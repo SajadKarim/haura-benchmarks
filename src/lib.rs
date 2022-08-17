@@ -56,7 +56,12 @@ impl Control {
 
         log::info!("using {:?}", cfg);
 
-        let database = Database::build(cfg).expect("Failed to open database");
+        let database = Database::buildex(cfg,
+                                         4*1024,
+                                         256,
+                                         1*1024,
+                                         512
+                                         ,128).expect("Failed to open database");
 
         Control {
             database: Arc::new(RwLock::new(database)),
@@ -66,6 +71,44 @@ impl Control {
     pub fn new() -> Self {
         Self::with_custom_config(|_| {})
     }
+
+    pub fn with_custom_configex(modify_cfg: impl Fn(&mut DatabaseConfiguration), n_MAX_INTERNAL_NODE_SIZE :usize, n_MIN_FLUSH_SIZE :usize, n_MIN_LEAF_NODE_SIZE :usize, n_MAX_MESSAGE_SIZE :usize, n_CHUNK_SIZE: u32) -> Self {
+        init_env_logger();
+
+        let conf_path = env::var("BETREE_CONFIG").expect("Didn't provide a BETREE_CONFIG");
+
+        let mut cfg: DatabaseConfiguration = figment::Figment::new()
+            .merge(DatabaseConfiguration::figment_default())
+            .merge(figment::providers::Json::file(conf_path))
+            .merge(DatabaseConfiguration::figment_env())
+            .extract()
+            .expect("Failed to extract DatabaseConfiguration");
+
+        cfg.access_mode = AccessMode::AlwaysCreateNew;
+
+        cfg.sync_interval_ms = Some(1000);
+
+        cfg.metrics = Some(metrics::MetricsConfiguration {
+            enabled: true,
+            interval_ms: 500,
+            output_path: PathBuf::from("betree-metrics.jsonl"),
+        });
+
+        modify_cfg(&mut cfg);
+
+        log::info!("using {:?}", cfg);
+
+        let database = Database::buildex(cfg,  n_MAX_INTERNAL_NODE_SIZE, n_MIN_FLUSH_SIZE, n_MIN_LEAF_NODE_SIZE, n_MAX_MESSAGE_SIZE, n_CHUNK_SIZE).expect("Failed to open database");
+
+        Control {
+            database: Arc::new(RwLock::new(database)),
+        }
+    }
+
+    pub fn newex(n_MAX_INTERNAL_NODE_SIZE :usize, n_MIN_FLUSH_SIZE :usize, n_MIN_LEAF_NODE_SIZE :usize, n_MAX_MESSAGE_SIZE :usize, n_CHUNK_SIZE: u32) -> Self {
+        Self::with_custom_configex(|_| {}, n_MAX_INTERNAL_NODE_SIZE, n_MIN_FLUSH_SIZE, n_MIN_LEAF_NODE_SIZE, n_MAX_MESSAGE_SIZE, n_CHUNK_SIZE)
+    }
+
 
     pub fn client(&mut self, id: u32, task: &[u8]) -> Client {
         let mut lock = self.database.write();

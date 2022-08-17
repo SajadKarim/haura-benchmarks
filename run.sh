@@ -20,20 +20,20 @@ function run {
   echo "running $mode with these settings:"
   env | grep BETREE__
   env > "env"
-  /home/skarim/myrepo/haura/betree/haura-benchmarks/target/release/bectl config print-active > "config"
-  /home/skarim/myrepo/haura/betree/haura-benchmarks/target/release/betree-perf "$mode" "$@"
+  /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/bectl config print-active > "config"
+  /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/betree-perf "$mode" "$@"
 
   echo "merging results into $out_path/out.jsonl"
-  /home/skarim/myrepo/haura/betree/haura-benchmarks/target/release/json-merge \
+  /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/json-merge \
     --timestamp-key epoch_ms \
     ./betree-metrics.jsonl \
     ./proc.jsonl \
     ./sysinfo.jsonl \
-    | /home/skarim/myrepo/haura/betree/haura-benchmarks/target/release/json-flatten > "out.jsonl"
+    | /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/json-flatten > "out.jsonl"
 
   popd
 
-  sleep 60
+  sleep 10
 }
 
 cargo build --release
@@ -48,28 +48,160 @@ function tiered() {
 	#export BETREE__STORAGE__TIERS="[ [ \"/vol2/datafile1\" ], [ \"/vol1/datafile1\" ] ]"
 	#export BETREE__STORAGE__TIERS="[ [ { path = \"/vol1/datafile1\", direct = false } ], [ { path = \"/vol2/datafile1\", direct = false } ] ]"
 	#export BETREE__STORAGE__TIERS="[ [ \"/mnt/pmemfs0/datafile1\" ], [ \"/mnt/pmemfs1/datafile1\" ] ]"
-	export BETREE__STORAGE__TIERS="[ [ { path = \"/mnt/pmemfs0/haura/datafile\", len = $((100 * 1024 * 1024 * 1024)) } ], [ { path = \"/mnt/pmemfs1/haura/datafile\", len = $((100 * 1024 * 1024 * 1024 )) } ] ]"
+	#export BETREE__STORAGE__TIERS="[ [ { path = \"/mnt/pmemfs0/haura/datafile\", len = $((100 * 1024 * 1024 * 1024)) } ], [ { path = \"/mnt/pmemfs1/haura/datafile\", len = $((100 * 1024 * 1024 * 1024 )) } ] ]"
 	#export BETREE__STORAGE__TIERS="[ [ { path = \"/mnt/pmemfs0/datafile1\", len = $((100 * 1024 * 1024 * 1024)) } ], [ { path = \"/mnt/pmemfs1/datafile1\", len = $((100 * 1024 * 1024 * 1024 )) } ] ]"
 	#export BETREE__STORAGE__TIERS="[ [ { mem = $((100 * 1024 * 1024 * 1024)) } ], [ { mem = $((100 * 1024 * 1024 * 1024)) } ] ]"
 
 	#local vdev_type="dram"
-	local vdev_type="pmem"
+	#local vdev_type="pmem"
 	#local vdev_type="ssd"
 	#local vdev_type="pmem_fs"
 
   (
-    export BETREE__ALLOC_STRATEGY='[[0],[0],[],[]]'
-    run "$vdev_type" tiered1_all0_alloc tiered1
+    export BETREE__ALLOC_STRATEGY='[[0],[],[],[]]'
+    export BETREE__STORAGE__TIERS="[ [ { mem = $((100 * 1024 * 1024 * 1024)) } ] ]"
+    local vdev_type="dram"
+
+    local log_path="$PWD/results/$(date -I)_${vdev_type}"
+
+    for scenario in 2 3 4 5 6 7 8 9 10 11 12;
+    do
+    (
+        for iter in 1;# 2 3 4 5;# 6 7 8 9 10;
+        do
+        (
+        echo "Running for scenario: $scenario"
+
+        local POW=$((2**$scenario))
+        local MAX_INTERNAL_NODE_SIZE=$((1024*$POW))
+        local MIN_LEAF_NODE_SIZE=$(($MAX_INTERNAL_NODE_SIZE/2))
+        local MAX_MESSAGE_SIZE=$(($MIN_LEAF_NODE_SIZE/2))
+        local MIN_FLUSH_SIZE=$(($MAX_MESSAGE_SIZE/2))
+        local CHUNK_SIZE=$(($MIN_FLUSH_SIZE/2))
+
+        local log="$log_path/$vdev_type_$scenario.txt"
+
+        run "$vdev_type" tiered1_all0_alloc tiered1 "$log" $MAX_INTERNAL_NODE_SIZE $MIN_LEAF_NODE_SIZE $MAX_MESSAGE_SIZE $MIN_FLUSH_SIZE $CHUNK_SIZE
+        #sleep 10
+        )
+        done
+        /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/results-merge "$log_path/{$vdev_type}_scenarios.txt" "$log_path/$vdev_type_$scenario.txt"
+    )
+    done
+  )
+
+
+  (
+    export BETREE__ALLOC_STRATEGY='[[0],[],[],[]]'
+    export BETREE__STORAGE__TIERS="[ [ \"/vol1/datafile1\" ] ]"
+    local vdev_type="ssdnvme"
+
+    local log_path="$PWD/results/$(date -I)_${vdev_type}"
+
+    for scenario in 2 3 4 5 6 7 8 9 10 11 12;
+    do
+    (
+	for iter in 1 2 3 4 5;# 6 7 8 9 10;
+	do
+	(
+        echo "Running for scenario: $scenario"
+
+	local POW=$((2**$scenario))
+	local MAX_INTERNAL_NODE_SIZE=$((1024*$POW))
+	local MIN_LEAF_NODE_SIZE=$(($MAX_INTERNAL_NODE_SIZE/2))
+	local MAX_MESSAGE_SIZE=$(($MIN_LEAF_NODE_SIZE/2))
+	local MIN_FLUSH_SIZE=$(($MAX_MESSAGE_SIZE/2))
+	local CHUNK_SIZE=$(($MIN_FLUSH_SIZE/2))
+
+	local log="$log_path/$vdev_type_$scenario.txt"
+
+	run "$vdev_type" tiered1_all0_alloc tiered1 "$log" $MAX_INTERNAL_NODE_SIZE $MIN_LEAF_NODE_SIZE $MAX_MESSAGE_SIZE $MIN_FLUSH_SIZE $CHUNK_SIZE
+        #sleep 10
+        )
+        done
+	/home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/results-merge "$log_path/{$vdev_type}_scenarios.txt" "$log_path/$vdev_type_$scenario.txt"
+    )
+    done
   )
 
   (
+    export BETREE__ALLOC_STRATEGY='[[0],[],[],[]]'
+    export BETREE__STORAGE__TIERS="[ [ { path = \"/mnt/pmemfs0/haura/datafile\", len = $((100 * 1024 * 1024 * 1024)) }  ] ]"
+    local vdev_type="nvram"
+
+    local log_path="$PWD/results/$(date -I)_${vdev_type}"
+
+    for scenario in 2 3 4 5 6 7 8 9 10 11 12;
+    do
+    (
+        for iter in 1 2 3 4 5;# 6 7 8 9 10;
+        do
+        (
+        echo "Running for scenario: $scenario"
+
+        local POW=$((2**$scenario))
+        local MAX_INTERNAL_NODE_SIZE=$((1024*$POW))
+        local MIN_LEAF_NODE_SIZE=$(($MAX_INTERNAL_NODE_SIZE/2))
+        local MAX_MESSAGE_SIZE=$(($MIN_LEAF_NODE_SIZE/2))
+        local MIN_FLUSH_SIZE=$(($MAX_MESSAGE_SIZE/2))
+        local CHUNK_SIZE=$(($MIN_FLUSH_SIZE/2))
+
+        local log="$log_path/$vdev_type_$scenario.txt"
+
+        run "$vdev_type" tiered1_all0_alloc tiered1 "$log" $MAX_INTERNAL_NODE_SIZE $MIN_LEAF_NODE_SIZE $MAX_MESSAGE_SIZE $MIN_FLUSH_SIZE $CHUNK_SIZE
+        #sleep 10
+        )
+        done
+        /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/results-merge "$log_path/{$vdev_type}_scenarios.txt" "$log_path/$vdev_type_$scenario.txt"
+    )
+    done
+  )
+
+
+
+  (
+    export BETREE__ALLOC_STRATEGY='[[0],[],[],[]]'
+    export BETREE__STORAGE__TIERS="[ [ \"/vol2/datafile1\" ] ]"
+    local vdev_type="ssdscsi"
+
+    local log_path="$PWD/results/$(date -I)_${vdev_type}"
+
+    for scenario in 2 3 4 5 6 7 8 9 10 11 12;
+    do
+    (
+        for iter in 1 2 3 4 5;# 6 7 8 9 10;
+        do
+        (
+        echo "Running for scenario: $scenario"
+
+        local POW=$((2**$scenario))
+        local MAX_INTERNAL_NODE_SIZE=$((1024*$POW))
+        local MIN_LEAF_NODE_SIZE=$(($MAX_INTERNAL_NODE_SIZE/2))
+        local MAX_MESSAGE_SIZE=$(($MIN_LEAF_NODE_SIZE/2))
+        local MIN_FLUSH_SIZE=$(($MAX_MESSAGE_SIZE/2))
+        local CHUNK_SIZE=$(($MIN_FLUSH_SIZE/2))
+
+        local log="$log_path/$vdev_type_$scenario.txt"
+
+        run "$vdev_type" tiered1_all0_alloc tiered1 "$log" $MAX_INTERNAL_NODE_SIZE $MIN_LEAF_NODE_SIZE $MAX_MESSAGE_SIZE $MIN_FLUSH_SIZE $CHUNK_SIZE
+        #sleep 10
+        )
+        done
+        /home/skarim/myrepo/benchmarks/haura/betree/haura-benchmarks/target/release/results-merge "$log_path/{$vdev_type}_scenarios.txt" "$log_path/$vdev_type_$scenario.txt"
+    )
+    done
+  )
+
+
+
+  (
     export BETREE__ALLOC_STRATEGY='[[0],[1],[],[]]'
-    run "$vdev_type" tiered1_id_alloc tiered1
+    #run "$vdev_type" tiered1_id_alloc tiered1
   )
 
   (
     export BETREE__ALLOC_STRATEGY='[[1],[1],[],[]]'
-    run "$vdev_type" tiered1_all1_alloc tiered1
+    #run "$vdev_type" tiered1_all1_alloc tiered1
   )
 }
 
